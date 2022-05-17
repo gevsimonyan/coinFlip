@@ -6,6 +6,7 @@ contract CoinFlip {
 	enum Status {PENDING, WON, LOSE}
 
 	struct Game {
+		uint256 id;
 		address player;
 		uint8 choice;
 		uint256 betAmount;
@@ -14,9 +15,10 @@ contract CoinFlip {
 		Status status;
 	}
 
-	mapping(uint256 => Game) public games;
+	mapping(bytes32 => Game) public games;
 
 	address public owner;
+	address public croupie;
 	uint256 public gamesCount;
 	uint256 public minBet = 0.01 ether;
 	uint256 public maxBet = 10 ether;
@@ -24,12 +26,27 @@ contract CoinFlip {
 	uint256 public coeff = 195;
 	uint256 public profit;
 
+	event GameCreated(address indexed player, uint256 betAmount, uint8 choice);
+	event GamePlayed(address indexed player, uint256 prize, uint256 choice, uint256 result,Status status);
+
+
 	constructor() {
 		owner = msg.sender;
+		croupie = msg.sender;
 	}
 
 	modifier onlyOwner {
 		require(msg.sender == owner, "CoinFlip: Only owner");
+		_;
+	}
+
+	modifier onlyCroupier() {
+		require(msg.sender == croupie, "CoinFlip: Only croupier");
+		_;
+	}
+
+	modifier onlyUniqueSeed(bytes32 _id) {
+		require(games[_id].id == 0, "CoinFlip: Only unique seed");
 		_;
 	}
 
@@ -45,40 +62,68 @@ contract CoinFlip {
 		coeff = _coeff;
 	}
 
-	function createGame(uint8 _choice) external payable {
-		require(msg.value >= minBet && msg.value <= maxBet, "Error");
-		require(_choice == 0 || _choice == 1, "Error");
+	// "game1" * private key -> hash = seed
+	// seed & public key  -> _v, _r, _s -> public key  
 
+	function play(uint8 choice, bytes32 seed) external payable onlyUniqueSeed(seed){
+		require(choice == 0 || choice == 1, "CoinFlip: Choice only 0 or 1");
+		require(msg.value >= minBet && msg.value <= maxBet, "CoinFlip: only bet in range");
 
-		games[gamesCount] = Game(
+		uint256 possiblePrize = msg.value * coeff / 100;
+		require(profit >= possiblePrize, "CoinFlip: not enought balance on contract");
+
+		gamesCount++;
+		profit += msg.value;
+
+		// Game storage game = games[seed];
+		// game.id = gamesCount;
+		// game.player = msg.sender;
+		// game.choice = choice;
+		// game.prize = 0;
+		// game.result = 0; 
+		// game.status = Status.PENDING;
+
+		games[seed] = Game(
+			gamesCount,
 			msg.sender,
-			_choice,
+			choice,
 			msg.value,
 			0,
 			0,
 			Status.PENDING
 		);
 
-		gamesCount += 1;
+		emit GameCreated(msg.sender, msg.value, choice);
+	
 	}
 
-	function play(uint256 _id) external {
-		Game storage game = games[_id];
+	function confirm(bytes32 seed, uint8 _v, bytes32 _r, bytes32 _s) external onlyUniqueSeed(seed) {		
+		bytes memory prefix = "\x19Ethereum Signed Message:\n32";
+		bytes32 prefixedHash = keccak256(abi.encodePacked(prefix, seed));
+	
+		require(ecrecover(prefixedHash, _v, _r, _s) == croupie, "Invalid sign");
+	
+		uint256 result = uint256(_s) % 2;
 
-		uint256 _result = block.timestamp % 2; 
-		game.result = _result;
+		Game storage game = games[seed];
 
-		if (game.choice == game.result) {
-			uint256 _prize = game.betAmount * coeff / 100; // local
-			game.prize = _prize;
-			game.status = Status.WON;
+		if (game.choice == result) {
 			
-			payable(game.player).transfer(_prize);
+			game.status = Status.WON;
+			game.result = result;
+			game.prize = game.betAmount * coeff / 100;
+			
+			profit -= game.prize;
+
+			payable(game.player).transfer(game.prize);
 		} else {
 			game.status = Status.LOSE;
-
+			game.result = result;
+			
 			profit += game.betAmount;
 		}
+
+		emit GamePlayed(game.player, game.prize, game.choice, game.result, game.status);
 	}
 
 	function withdraw(uint256 _amount) external onlyOwner {

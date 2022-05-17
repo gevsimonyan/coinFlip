@@ -1,21 +1,60 @@
 require("@nomiclabs/hardhat-waffle");
+require("hardhat-deploy");
+require("@nomiclabs/hardhat-etherscan");
+require("@nomiclabs/hardhat-ethers");
+require("hardhat-deploy-ethers");
+require("@nomiclabs/hardhat-web3");
 
-// This is a sample Hardhat task. To learn how to create your own go to
-// https://hardhat.org/guides/create-task.html
+const {
+	normalizeHardhatNetworkAccountsConfig
+} = require("hardhat/internal/core/providers/util")
+
+const {
+	BN,
+	bufferToHex,
+	privateToAddress,
+	toBuffer
+} = require("ethereumjs-util")
+
+
+
 task("accounts", "Prints the list of accounts", async (taskArgs, hre) => {
-  const accounts = await hre.ethers.getSigners();
+	const networkConfig = hre.config.networks["hardhat"]
 
-  for (const account of accounts) {
-    console.log(account.address);
-  }
+
+	const accounts = normalizeHardhatNetworkAccountsConfig(networkConfig.accounts)
+
+	console.log("Accounts")
+	console.log("========")
+
+	for (const [index, account] of accounts.entries()) {
+		const address = bufferToHex(privateToAddress(toBuffer(account.privateKey)))
+		const privateKey = bufferToHex(toBuffer(account.privateKey))
+		const balance = new BN(account.balance).div(new BN(10).pow(new BN(18))).toString(10)
+		console.log(`Account #${index}: ${address} (${balance} ETH) Private Key: ${privateKey}`)
+	}
 });
 
-// You need to export an object to set up your config
-// Go to https://hardhat.org/config/ to learn more
+const ALCHEMY_API_KEY = "APIKEY";
+const PRIVATE_KEY = "APIKEY";
+const ETHERSCAN_APIKEY = "APIKEY";
 
-/**
- * @type import('hardhat/config').HardhatUserConfig
- */
 module.exports = {
-  solidity: "0.8.7",
+	networks: {
+		hardhat: {
+		}
+	},
+	namedAccounts: {
+		deployer: {
+			default: 0,
+		},
+		caller: {
+			default: 1,
+		},
+
+	},
+	etherscan: {
+		apiKey: ETHERSCAN_APIKEY,
+	},
+	solidity: "0.8.7",
 };
